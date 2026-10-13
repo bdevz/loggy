@@ -18,6 +18,7 @@ import {
   type Result,
   type SubmissionChange,
   type SubmissionId,
+  type SubmissionReadOptions,
   type SubmissionSnapshot,
   type UpdateSubmissionCommand,
 } from "./domain";
@@ -340,7 +341,7 @@ export class RealLog1Port implements Log1Port {
     return ok(interviews);
   }
 
-  async findSubmissions(actor: ActorContext, query: string): Promise<Result<readonly SubmissionSnapshot[], Log1Error>> {
+  async findSubmissions(actor: ActorContext, query: string, options?: SubmissionReadOptions): Promise<Result<readonly SubmissionSnapshot[], Log1Error>> {
     const search = encodeURIComponent(query.trim().replace(/&/g, ":amp:"));
     const response = await this.request(actor, `/api/submission/?page=1&page_size=10&query=${search}&filter_json=${encodeURIComponent("{}")}&sort_by=modified&filter_for=all`);
     if (!response.ok) return response;
@@ -350,6 +351,10 @@ export class RealLog1Port implements Log1Port {
     for (const row of rows) {
       const mapped = submissionFrom(row);
       if (!mapped.ok) return mapped;
+      if (options?.includeInterviews === false) {
+        output.push(mapped.value);
+        continue;
+      }
       const interviews = await this.interviewsFor(actor, mapped.value);
       if (!interviews.ok) return interviews;
       output.push({ ...mapped.value, interviews: interviews.value });
@@ -357,12 +362,13 @@ export class RealLog1Port implements Log1Port {
     return ok(output);
   }
 
-  async getSubmission(actor: ActorContext, id: SubmissionId): Promise<Result<SubmissionSnapshot, Log1Error>> {
+  async getSubmission(actor: ActorContext, id: SubmissionId, options?: SubmissionReadOptions): Promise<Result<SubmissionSnapshot, Log1Error>> {
     const response = await this.request(actor, `/api/v2/submission/${encodeURIComponent(String(id))}`);
     if (!response.ok) return err(response.error);
     const raw = responseData(response.value);
     const mapped = submissionFrom(raw);
     if (!mapped.ok) return mapped;
+    if (options?.includeInterviews === false) return mapped;
     const interviews = await this.interviewsFor(actor, mapped.value);
     return interviews.ok ? ok({ ...mapped.value, interviews: interviews.value }) : interviews;
   }

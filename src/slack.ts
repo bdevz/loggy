@@ -419,13 +419,13 @@ export async function routeSlashCommand(input: {
   if (subcommand !== "update" && subcommand !== "feedback") return { response_type: "ephemeral", text: usageText };
 
   const query = queryParts.join(" ");
-  const found = await input.port.findSubmissions(input.actor, query);
+  const found = await input.port.findSubmissions(input.actor, query, { includeInterviews: false });
   if (!found.ok) return { response_type: "ephemeral", text: describeLog1Error(found.error) };
   const candidate = found.value[0];
   if (candidate === undefined) {
     return { response_type: "ephemeral", text: query.length === 0 ? "No submissions are available." : `No submission matched “${query}”.` };
   }
-  const detail = await input.port.getSubmission(input.actor, candidate.id);
+  const detail = await input.port.getSubmission(input.actor, candidate.id, { includeInterviews: subcommand === "feedback" });
   if (!detail.ok) return { response_type: "ephemeral", text: describeLog1Error(detail.error) };
   const fullCandidate = detail.value;
   if (subcommand === "update") {

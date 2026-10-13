@@ -157,9 +157,13 @@ export type Log1Error =
 
 export type Result<T, E> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };
 
+export type SubmissionReadOptions = {
+  readonly includeInterviews: boolean;
+};
+
 export interface Log1Port {
-  findSubmissions(actor: ActorContext, query: string): Promise<Result<readonly SubmissionSnapshot[], Log1Error>>;
-  getSubmission(actor: ActorContext, id: SubmissionId): Promise<Result<SubmissionSnapshot, Log1Error>>;
+  findSubmissions(actor: ActorContext, query: string, options?: SubmissionReadOptions): Promise<Result<readonly SubmissionSnapshot[], Log1Error>>;
+  getSubmission(actor: ActorContext, id: SubmissionId, options?: SubmissionReadOptions): Promise<Result<SubmissionSnapshot, Log1Error>>;
   updateSubmission(command: UpdateSubmissionCommand): Promise<Result<SubmissionSnapshot, Log1Error>>;
   recordFeedback(command: RecordFeedbackCommand): Promise<Result<FeedbackRecordResult, Log1Error>>;
 }

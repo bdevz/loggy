@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { authenticatedActor, commandId, interviewId, submissionId, unauthenticatedActor, type ActorContext } from "./domain";
 import { RealLog1Port } from "./real-log1-port";
+import { routeSlashCommand } from "./slack";
 
 const actor: ActorContext = authenticatedActor({ actorId: "U-1", workspaceId: "T-1", accessToken: "secret" });
 const submission = {
@@ -27,6 +28,51 @@ const interview = {
 
 const response = (value: unknown, status = 200): Response =>
   new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+
+test("opens an update form without fetching interviews for search results or the selected submission", async () => {
+  const paths: string[] = [];
+  const port = new RealLog1Port({
+    fetch: async (input) => {
+      const path = new URL(input.toString()).pathname;
+      paths.push(path);
+      if (path === "/api/submission/") return response({ data: Array.from({ length: 10 }, (_, index) => ({ ...submission, id: 7 + index })) });
+      if (path === "/api/v2/submission/7") return response({ data: { ...submission, client: "Current client" } });
+      return response({ detail: "Interview service unavailable" }, 503);
+    },
+  });
+  const result = await routeSlashCommand({
+    payload: { command: "/log1", text: "update Nisha Karki", user_id: "U-1", team_id: "T-1" },
+    actor,
+    port,
+    commandId: commandId("update-lookup"),
+  });
+  assert.equal(result.view?.callback_id, "log1_update_submission");
+  assert.match(JSON.stringify(result.view), /Current client/);
+  assert.deepEqual(paths, ["/api/submission/", "/api/v2/submission/7"]);
+});
+
+test("opens a feedback form with interviews loaded only for the selected submission", async () => {
+  const paths: string[] = [];
+  const port = new RealLog1Port({
+    fetch: async (input) => {
+      const path = new URL(input.toString()).pathname;
+      paths.push(path);
+      if (path === "/api/submission/") return response({ data: [submission, { ...submission, id: 8 }] });
+      if (path === "/api/v2/submission/7") return response({ data: submission });
+      if (path === "/api/v2/submission/7/interviews/") return response({ data: [interview] });
+      return response({ detail: "unexpected" }, 404);
+    },
+  });
+  const result = await routeSlashCommand({
+    payload: { command: "/log1", text: "feedback Nisha Karki", user_id: "U-1", team_id: "T-1" },
+    actor,
+    port,
+    commandId: commandId("feedback-lookup"),
+  });
+  assert.equal(result.view?.callback_id, "log1_feedback");
+  assert.equal(JSON.parse(result.view?.private_metadata ?? "{}").interviewId, "12");
+  assert.deepEqual(paths, ["/api/submission/", "/api/v2/submission/7", "/api/v2/submission/7/interviews/"]);
+});
 
 test("maps live submission and interview list responses and scopes the token", async () => {
   const requests: Array<{ url: URL; authorization: string | null; accept: string | null }> = [];
