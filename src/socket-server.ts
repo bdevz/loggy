@@ -174,6 +174,7 @@ export const createSocketModeApp = (options: SocketModeOptions = {}): App => {
 
 export const startSocketModeServer = async (): Promise<App> => {
   const app = createSocketModeApp();
+  await app.init();
   await app.start();
   process.stdout.write("Log1 Slack Socket Mode app connected.\n");
   return app;
