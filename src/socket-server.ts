@@ -151,7 +151,8 @@ export const createSocketModeApp = (options: SocketModeOptions = {}): App => {
       port,
       commandId: makeStableCommandId(`socket:${payload.trigger_id ?? `${payload.user_id}:${payload.text}`}`),
       slackApi,
-    }).catch(async () => {
+    }).catch(async (error: unknown) => {
+      process.stderr.write(`Log1 slash command failed: ${error instanceof Error ? error.message : "unknown_error"}\n`);
       if (payload.channel_id !== undefined) {
         await client.chat.postEphemeral({ channel: payload.channel_id, user: payload.user_id, text: "Log1 could not process that command. Try again." }).catch(() => undefined);
       }
