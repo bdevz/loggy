@@ -405,7 +405,7 @@ export class RealLog1Port implements Log1Port {
   }
 
   async getSubmission(actor: ActorContext, id: SubmissionId, options?: SubmissionReadOptions): Promise<Result<SubmissionSnapshot, Log1Error>> {
-    const response = await this.request(actor, `/api/v2/submission/${encodeURIComponent(String(id))}`);
+    const response = await this.request(actor, `/api/v2/submission/${encodeURIComponent(String(id))}/`);
     if (!response.ok) return err(response.error);
     const raw = responseData(response.value);
     const mapped = submissionFrom(raw);
@@ -422,7 +422,7 @@ export class RealLog1Port implements Log1Port {
     const current = await this.getSubmission(command.actor, command.submissionId);
     if (!current.ok) return current;
     if (current.value.version !== command.expectedVersion) return err({ kind: "conflict", expectedVersion: command.expectedVersion, currentVersion: current.value.version, message: "The submission changed in Log1; re-open the modal and try again." });
-    const detailResponse = await this.request(command.actor, `/api/v2/submission/${encodeURIComponent(String(command.submissionId))}`);
+    const detailResponse = await this.request(command.actor, `/api/v2/submission/${encodeURIComponent(String(command.submissionId))}/`);
     if (!detailResponse.ok) return err(detailResponse.error);
     const permission = isRecord(detailResponse.value) ? recordValue(detailResponse.value, "permission") : undefined;
     if (permission === undefined || permission.update !== true) return err(validation("You do not have permission to update this submission.", "permission"));
@@ -475,7 +475,7 @@ export class RealLog1Port implements Log1Port {
     const interview = current.value.interviews.find((item) => item.id === command.interviewId);
     if (interview === undefined) return err(notFound("interview", String(command.interviewId)));
     if (interview.status !== "completed") return err(validation("Feedback can only be recorded for a completed interview.", "interviewId"));
-    const detail = await this.request(command.actor, `/api/v2/submission/${encodeURIComponent(String(command.submissionId))}`);
+    const detail = await this.request(command.actor, `/api/v2/submission/${encodeURIComponent(String(command.submissionId))}/`);
     if (!detail.ok) return err(detail.error);
     if (!canUpdate(detail.value)) return err(validation("You do not have permission to record feedback for this submission.", "permission"));
     const detailRaw = responseData(detail.value);

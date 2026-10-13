@@ -63,7 +63,7 @@ test("opens a feedback form with interviews loaded only for the selected submiss
       const path = new URL(input.toString()).pathname;
       paths.push(path);
       if (path === "/api/submission/") return response({ data: [submission, { ...submission, id: 8 }] });
-      if (path === "/api/v2/submission/7") return response({ data: submission });
+      if (path === "/api/v2/submission/7/") return response({ data: submission });
       if (path === "/api/v2/submission/7/interviews/") return response({ data: [interview] });
       return response({ detail: "unexpected" }, 404);
     },
@@ -76,14 +76,14 @@ test("opens a feedback form with interviews loaded only for the selected submiss
   });
   assert.equal(result.view?.callback_id, "log1_feedback");
   assert.equal(JSON.parse(result.view?.private_metadata ?? "{}").interviewId, "12");
-  assert.deepEqual(paths, ["/api/submission/", "/api/v2/submission/7", "/api/v2/submission/7/interviews/"]);
+  assert.deepEqual(paths, ["/api/submission/", "/api/v2/submission/7/", "/api/v2/submission/7/interviews/"]);
 });
 
 test("accepts a bare interview array from the live submission detail flow", async () => {
   const port = new RealLog1Port({
     fetch: async (input) => {
       const path = new URL(input.toString()).pathname;
-      if (path === "/api/v2/submission/7") return response({ data: submission, permission: { update: true } });
+      if (path === "/api/v2/submission/7/") return response({ data: submission, permission: { update: true } });
       if (path === "/api/v2/submission/7/interviews/") return response([]);
       return response({ detail: "unexpected" }, 404);
     },
@@ -233,7 +233,7 @@ test("records feedback through Log1's multipart supervisor endpoint", async () =
     fetch: async (input, init) => {
       const url = new URL(input.toString());
       calls.push({ path: url.pathname, method: init?.method ?? "GET", body: init?.body });
-      if (url.pathname === "/api/v2/submission/7") return response({ data: submission, permission: { update: true } });
+      if (url.pathname === "/api/v2/submission/7/") return response({ data: submission, permission: { update: true } });
       if (url.pathname === "/api/v2/submission/7/interviews/") return response({ data: [interview] });
       if (url.pathname === "/api/interview/12/") return response({ data: interview, permission: { update: true } });
       if (url.pathname === "/api/interview/12/supervisor_feedback/") return response({ message: "saved" });
@@ -283,7 +283,7 @@ test("updates Log1 live fields with the documented PUT payload", async () => {
   const port = new RealLog1Port({
     fetch: async (input, init) => {
       const url = new URL(input.toString());
-      if (url.pathname === "/api/v2/submission/7") return response({ data: liveSubmission, permission: { update: true } });
+      if (url.pathname === "/api/v2/submission/7/") return response({ data: liveSubmission, permission: { update: true } });
       if (url.pathname === "/api/v2/submission/7/interviews/") return response({ data: [interview] });
       if (url.pathname === "/api/submission/7/" && init?.method === "PUT") {
         puts.push({ url, body: String(init.body), contentType: new Headers(init.headers).get("content-type") });
@@ -331,7 +331,7 @@ test("rejects a submission update when Log1 denies update permission before writ
     fetch: async (input) => {
       const url = new URL(input.toString());
       paths.push(url.pathname);
-      if (url.pathname === "/api/v2/submission/7") return response({ data: submission, permission: { update: false } });
+      if (url.pathname === "/api/v2/submission/7/") return response({ data: submission, permission: { update: false } });
       if (url.pathname === "/api/v2/submission/7/interviews/") return response({ data: [interview] });
       return response({ detail: "write should not happen" }, 500);
     },
@@ -359,7 +359,7 @@ test("rejects feedback when Log1 denies update permission before posting multipa
     fetch: async (input) => {
       const url = new URL(input.toString());
       paths.push(url.pathname);
-      if (url.pathname === "/api/v2/submission/7") return response({ data: submission, permission: { update: false } });
+      if (url.pathname === "/api/v2/submission/7/") return response({ data: submission, permission: { update: false } });
       if (url.pathname === "/api/v2/submission/7/interviews/") return response({ data: [interview] });
       return response({ detail: "feedback should not happen" }, 500);
     },
@@ -391,7 +391,7 @@ test("rejects feedback when the interview permission is denied", async () => {
     fetch: async (input) => {
       const url = new URL(input.toString());
       paths.push(url.pathname);
-      if (url.pathname === "/api/v2/submission/7") return response({ data: submission, permission: { update: true } });
+      if (url.pathname === "/api/v2/submission/7/") return response({ data: submission, permission: { update: true } });
       if (url.pathname === "/api/v2/submission/7/interviews/") return response({ data: [interview] });
       if (url.pathname === "/api/interview/12/") return response({ data: interview, permission: { update: false } });
       return response({ detail: "feedback should not happen" }, 500);
@@ -425,7 +425,7 @@ test("rejects feedback when the interview is not completed", async () => {
     fetch: async (input) => {
       const url = new URL(input.toString());
       paths.push(url.pathname);
-      if (url.pathname === "/api/v2/submission/7") return response({ data: submission, permission: { update: true } });
+      if (url.pathname === "/api/v2/submission/7/") return response({ data: submission, permission: { update: true } });
       if (url.pathname === "/api/v2/submission/7/interviews/") return response({ data: [scheduledInterview] });
       if (url.pathname === "/api/interview/12/") return response({ data: scheduledInterview, permission: { update: true } });
       return response({ detail: "feedback should not happen" }, 500);
