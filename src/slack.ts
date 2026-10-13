@@ -322,7 +322,7 @@ export const buildFeedbackModal = (
   return {
     type: "modal",
     callback_id: "log1_feedback",
-    title: plainText("Record interview feedback"),
+    title: plainText("Interview feedback"),
     submit: plainText("Record feedback"),
     close: plainText("Cancel"),
     private_metadata: metadataFor("feedback", candidate, command, interview.id),

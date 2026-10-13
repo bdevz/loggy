@@ -75,6 +75,7 @@ test("opens a feedback form with interviews loaded only for the selected submiss
     commandId: commandId("feedback-lookup"),
   });
   assert.equal(result.view?.callback_id, "log1_feedback");
+  assert.ok((result.view?.title.text.length ?? 0) < 25);
   assert.equal(JSON.parse(result.view?.private_metadata ?? "{}").interviewId, "12");
   assert.deepEqual(paths, ["/api/submission/", "/api/v2/submission/7/", "/api/v2/submission/7/interviews/"]);
 });
