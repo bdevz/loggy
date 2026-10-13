@@ -110,6 +110,28 @@ test("feedback lookup skips a newer matching submission without a completed inte
   ]);
 });
 
+test("feedback lookup can reopen a completed interview with existing answers", async () => {
+  const port = new RealLog1Port({
+    fetch: async (input) => {
+      const path = new URL(input.toString()).pathname;
+      if (path === "/api/submission/") return response({ data: [submission] });
+      if (path === "/api/v2/submission/7/") return response({ data: submission });
+      if (path === "/api/v2/submission/7/interviews/") {
+        return response({ data: [{ ...interview, feedback: { recommendation: "yes", score: 4, strengths: "Clear", concerns: "None", notes: "Advance", submitted_at: "2026-10-13T12:30:00Z" } }] });
+      }
+      return response({ detail: "unexpected" }, 404);
+    },
+  });
+  const result = await routeSlashCommand({
+    payload: { command: "/log1", text: "feedback Nisha Karki", user_id: "U-1", team_id: "T-1" },
+    actor,
+    port,
+    commandId: commandId("feedback-reopen"),
+  });
+  assert.equal(result.view?.callback_id, "log1_feedback");
+  assert.match(JSON.stringify(result.view), /Advance/);
+});
+
 test("accepts a bare interview array from the live submission detail flow", async () => {
   const port = new RealLog1Port({
     fetch: async (input) => {

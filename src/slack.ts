@@ -481,7 +481,7 @@ export async function routeSlashCommand(input: {
       lastDetailError = detail.error;
       continue;
     }
-    const interview = detail.value.interviews.find((item) => item.status === "completed" && item.feedback === null);
+    const interview = detail.value.interviews.find((item) => item.status === "completed");
     if (interview === undefined) continue;
     // The list response has the canonical candidate identity. Detail responses
     // can omit consultant_name, so keep that identity when hydrating the form.
