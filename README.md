@@ -39,17 +39,20 @@ The modal builders and parser are transport-friendly Block Kit values. Slash com
 
 ## Socket Mode deployment
 
-For a Cashew-style long-running host, use the Socket Mode entrypoint. It uses the Slack Bolt `App` with `socketMode: true`, so no public HTTP endpoint is required:
+For a Cashew-style long-running host, use the Socket Mode entrypoint. It uses one Slack Bolt `App` per configured workspace with `socketMode: true`, so no public HTTP endpoint is required:
 
 ```sh
-SLACK_WORKSPACE_ID='T123' \
+LOGGY_WORKSPACES='T123,T456' \
 SLACK_APP_TOKEN_T123='xapp-...' \
 SLACK_BOT_TOKEN_T123='xoxb-...' \
 LOG1_ACTOR_TOKEN_T123='...' \
+SLACK_APP_TOKEN_T456='xapp-...' \
+SLACK_BOT_TOKEN_T456='xoxb-...' \
+LOG1_ACTOR_TOKEN_T456='...' \
 npm run start:socket
 ```
 
-`SLACK_APP_TOKEN_<TEAM_ID>` is the app-level token with `connections:write`; `SLACK_BOT_TOKEN_<TEAM_ID>` is the installed bot token. The process accepts one Slack installation and resolves its Log1 actor token from the same workspace-scoped environment convention. Set `SLACK_WORKSPACE_ID` explicitly, or omit it only when exactly one `SLACK_APP_TOKEN_<TEAM_ID>` variable is present. The Socket Mode process handles `/log1` and both modal callbacks through the same routing, parser, services, and live `RealLog1Port` used by the HTTP transport. The existing `npm start` HTTP entrypoint remains available for deployments that provide public HTTPS request URLs.
+`SLACK_APP_TOKEN_<TEAM_ID>` is the app-level token with `connections:write`; `SLACK_BOT_TOKEN_<TEAM_ID>` is the installed bot token. Set `LOGGY_WORKSPACES` to a comma-separated list when one process serves multiple installations. If it is omitted, the process infers every non-empty workspace suffix from the scoped app-token variables. Each app handles `/log1` and both modal callbacks only for its own workspace. The existing `npm start` HTTP entrypoint remains available for deployments that provide public HTTPS request URLs.
 
 `run.ps1` is the Cashew-style Windows keep-alive runner. On the host, place the workspace-scoped values in `C:\loggy\.env`, run `npm install`, and launch `powershell -ExecutionPolicy Bypass -File .\run.ps1` from the interactive desktop session. The runner takes a host-wide mutex before starting, loads the file into the process environment, writes only process output to `logs\stdout.log`, and restarts the Socket Mode worker after an exit. Starting the runner twice leaves the first worker running.
 

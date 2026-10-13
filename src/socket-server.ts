@@ -44,20 +44,36 @@ const nonEmpty = (value: string | undefined, name: string): string => {
   return trimmed;
 };
 
-const workspaceFromEnvironment = (environment: NodeJS.ProcessEnv): string => {
-  const configured = environment.SLACK_WORKSPACE_ID?.trim() || environment.LOGGY_WORKSPACE_ID?.trim();
-  if (configured !== undefined && configured.length > 0) return configured;
+const workspaceIdPattern = /^[A-Za-z0-9_-]+$/;
 
-  // A suffixed app token is enough to infer the target workspace when there is
-  // exactly one candidate. Requiring a unique suffix avoids accidentally
-  // starting a process with credentials for the wrong Slack installation.
+const appTokenWorkspaceIds = (environment: NodeJS.ProcessEnv): readonly string[] => {
   const suffixes = Object.keys(environment)
     .filter((key) => key.startsWith("SLACK_APP_TOKEN_") && key !== "SLACK_APP_TOKEN_WORKSPACE_ID")
     .map((key) => key.slice("SLACK_APP_TOKEN_".length))
-    .filter((suffix) => suffix.length > 0 && /^[A-Za-z0-9_-]+$/.test(suffix) && (environment[`SLACK_APP_TOKEN_${suffix}`]?.trim().length ?? 0) > 0);
-  const unique = [...new Set(suffixes)];
-  if (unique.length === 1) return unique[0] as string;
-  throw new Error("SLACK_WORKSPACE_ID is not configured and the app token suffix is not unique.");
+    .filter((suffix) => suffix.length > 0 && workspaceIdPattern.test(suffix) && (environment[`SLACK_APP_TOKEN_${suffix}`]?.trim().length ?? 0) > 0);
+  return [...new Set(suffixes)];
+};
+
+/** Resolve the workspace set owned by one Socket Mode process. */
+export const workspaceIdsFromEnvironment = (environment: NodeJS.ProcessEnv = process.env): readonly string[] => {
+  const configured = environment.LOGGY_WORKSPACES?.trim() || environment.SLACK_WORKSPACE_IDS?.trim();
+  if (configured !== undefined && configured.length > 0) {
+    const ids = configured.split(",").map((value) => value.trim()).filter((value) => value.length > 0);
+    if (ids.length === 0 || ids.some((id) => !workspaceIdPattern.test(id))) throw new Error("LOGGY_WORKSPACES contains an invalid Slack workspace ID.");
+    const unique = [...new Set(ids)];
+    if (unique.length !== ids.length) throw new Error("LOGGY_WORKSPACES contains duplicate Slack workspace IDs.");
+    return unique;
+  }
+
+  const legacy = environment.SLACK_WORKSPACE_ID?.trim() || environment.LOGGY_WORKSPACE_ID?.trim();
+  if (legacy !== undefined && legacy.length > 0) {
+    if (!workspaceIdPattern.test(legacy)) throw new Error("SLACK_WORKSPACE_ID is invalid.");
+    return [legacy];
+  }
+
+  const inferred = appTokenWorkspaceIds(environment);
+  if (inferred.length > 0) return inferred;
+  throw new Error("LOGGY_WORKSPACES is not configured and no Slack app token suffix is available.");
 };
 
 const boltSlackApi = (client: SlackApiClient): SlackApi => ({
@@ -106,12 +122,16 @@ const modalIdentity = (payload: ViewSubmitAction): { readonly userId: string; re
 
 /**
  * Construct the Bolt Socket Mode app used by the Cashew-style host process.
- * The app accepts one Slack installation per process; all credentials are
- * resolved from workspace-scoped environment variables before it connects.
+ * All credentials are resolved from workspace-scoped environment variables
+ * before the app connects.
  */
 export const createSocketModeApp = (options: SocketModeOptions = {}): App => {
   const environment = options.environment ?? process.env;
-  const workspaceId = options.workspaceId?.trim() || workspaceFromEnvironment(environment);
+  const configuredWorkspaceId = options.workspaceId?.trim();
+  const workspaceId = configuredWorkspaceId === undefined || configuredWorkspaceId.length === 0
+    ? workspaceIdsFromEnvironment(environment)[0]
+    : configuredWorkspaceId;
+  if (workspaceId === undefined) throw new Error("No Slack workspace is configured.");
   const resolveBotToken = createScopedEnvTokenResolver("SLACK_BOT_TOKEN", environment);
   const resolveAppToken = createScopedEnvTokenResolver("SLACK_APP_TOKEN", environment);
   const resolveSyncToken = (value: string | Promise<string | undefined> | undefined, name: string): string => {
@@ -149,7 +169,7 @@ export const createSocketModeApp = (options: SocketModeOptions = {}): App => {
       payload,
       actor,
       port,
-      commandId: makeStableCommandId(`socket:${payload.trigger_id ?? `${payload.user_id}:${payload.text}`}`),
+      commandId: makeStableCommandId(`socket:${payload.team_id}:${payload.trigger_id ?? `${payload.user_id}:${payload.text}`}`),
       slackApi,
     }).catch(async (error: unknown) => {
       process.stderr.write(`Log1 slash command failed: ${error instanceof Error ? error.message : "unknown_error"}\n`);
@@ -189,15 +209,26 @@ export const createSocketModeApp = (options: SocketModeOptions = {}): App => {
 };
 
 export const startSocketModeServer = async (): Promise<App> => {
-  const app = createSocketModeApp();
-  await app.init();
-  await app.start();
-  process.stdout.write("Log1 Slack Socket Mode app connected.\n");
+  const apps = await startSocketModeServers();
+  const app = apps[0];
+  if (app === undefined) throw new Error("No Slack workspaces are configured.");
   return app;
 };
 
+export const startSocketModeServers = async (): Promise<readonly App[]> => {
+  const environment = process.env;
+  const workspaceIds = workspaceIdsFromEnvironment(environment);
+  const apps = workspaceIds.map((workspaceId) => createSocketModeApp({ workspaceId, environment }));
+  await Promise.all(apps.map(async (app) => {
+    await app.init();
+    await app.start();
+  }));
+  process.stdout.write(`Log1 Slack Socket Mode apps connected for ${workspaceIds.join(", ")}.\n`);
+  return apps;
+};
+
 if (require.main === module) {
-  void startSocketModeServer().catch((error: unknown) => {
+  void startSocketModeServers().catch((error: unknown) => {
     process.stderr.write(`${error instanceof Error ? error.message : "Log1 Slack Socket Mode startup failed."}\n`);
     process.exitCode = 1;
   });
