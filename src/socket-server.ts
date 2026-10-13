@@ -136,6 +136,10 @@ export const createSocketModeApp = (options: SocketModeOptions = {}): App => {
       port,
       commandId: makeStableCommandId(`socket:${payload.trigger_id ?? `${payload.user_id}:${payload.text}`}`),
       slackApi,
+      // Log1's search endpoint is consistently just over two seconds from the
+      // Cashew host. Keep the lookup inside Slack's trigger lifetime while
+      // allowing the live request enough room to complete.
+      lookupTimeoutMs: 2_800,
     }).catch(async () => {
       if (payload.channel_id !== undefined) {
         await client.chat.postEphemeral({ channel: payload.channel_id, user: payload.user_id, text: "Log1 could not process that command. Try again." }).catch(() => undefined);
