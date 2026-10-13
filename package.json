@@ -1,0 +1,21 @@
+{
+  "name": "log1-slack-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first Slack workflow for common log1 submission and interview work.",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/*.test.js",
+    "demo": "npm run build && node dist/demo.js",
+    "smoke:live": "npm run build && node dist/live-read-smoke.js",
+    "start": "npm run build && node dist/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

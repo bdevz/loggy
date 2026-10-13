@@ -1,0 +1,42 @@
+{
+  "_metadata": {
+    "major_version": 1
+  },
+  "display_information": {
+    "name": "Log1",
+    "description": "Run Log1 recruiting workflows from Slack.",
+    "background_color": "#2c2c2c"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Log1",
+      "always_online": false
+    },
+    "slash_commands": [
+      {
+        "command": "/log1",
+        "url": "https://YOUR_PUBLIC_HOST.example.com/slack/commands",
+        "description": "Update submissions and record interview feedback in Log1.",
+        "usage_hint": "help | update [candidate] | feedback [candidate]",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "commands",
+        "chat:write"
+      ]
+    }
+  },
+  "settings": {
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://YOUR_PUBLIC_HOST.example.com/slack/interactions"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
