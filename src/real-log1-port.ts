@@ -241,6 +241,7 @@ const responseData = (value: unknown): unknown => {
 };
 
 const listData = (value: unknown): readonly unknown[] | undefined => {
+  if (Array.isArray(value)) return value;
   const data = responseData(value);
   return Array.isArray(data) ? data : isRecord(data) && Array.isArray(data.data) ? data.data : undefined;
 };
@@ -250,6 +251,8 @@ const consultantNameFrom = (value: unknown): string | undefined => {
   const nested = recordValue(value, "consultant") ?? recordValue(value, "consultant_marketing");
   return stringField(value, "canonical_name")
     ?? stringField(value, "consultant_name")
+    ?? stringField(value, "consultant")
+    ?? stringField(value, "consultant_marketing")
     ?? stringField(value, "full_name")
     ?? stringField(value, "name")
     ?? stringField(value, "label")

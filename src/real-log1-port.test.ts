@@ -79,6 +79,23 @@ test("opens a feedback form with interviews loaded only for the selected submiss
   assert.deepEqual(paths, ["/api/submission/", "/api/v2/submission/7", "/api/v2/submission/7/interviews/"]);
 });
 
+test("accepts a bare interview array from the live submission detail flow", async () => {
+  const port = new RealLog1Port({
+    fetch: async (input) => {
+      const path = new URL(input.toString()).pathname;
+      if (path === "/api/v2/submission/7") return response({ data: submission, permission: { update: true } });
+      if (path === "/api/v2/submission/7/interviews/") return response([]);
+      return response({ detail: "unexpected" }, 404);
+    },
+  });
+
+  const result = await port.getSubmission(actor, submissionId("7"), { includeInterviews: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.id, "7");
+  assert.deepEqual(result.value.interviews, []);
+});
+
 test("maps live submission and interview list responses and scopes the token", async () => {
   const requests: Array<{ url: URL; authorization: string | null; accept: string | null }> = [];
   const port = new RealLog1Port({
