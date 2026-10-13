@@ -474,12 +474,22 @@ export async function routeSlashCommand(input: {
     // on a second network round trip.
     return { response_type: "ephemeral", text: `Opening an update form for ${candidate.candidateName}.`, view: buildUpdateSubmissionModal(candidate, input.commandId) };
   }
-  const detail = await input.port.getSubmission(input.actor, candidate.id, { includeInterviews: true });
-  if (!detail.ok) return { response_type: "ephemeral", text: describeLog1Error(detail.error) };
-  const fullCandidate = detail.value;
-  const interview = fullCandidate.interviews.find((item) => item.status === "completed" && item.feedback === null);
-  if (interview === undefined) return { response_type: "ephemeral", text: `No completed interview is available for ${candidate.candidateName}.` };
-  return { response_type: "ephemeral", text: `Opening a feedback form for ${fullCandidate.candidateName}.`, view: buildFeedbackModal(fullCandidate, interview, input.commandId) };
+  let lastDetailError: Log1Error | undefined;
+  for (const match of found.value) {
+    const detail = await input.port.getSubmission(input.actor, match.id, { includeInterviews: true });
+    if (!detail.ok) {
+      lastDetailError = detail.error;
+      continue;
+    }
+    const interview = detail.value.interviews.find((item) => item.status === "completed" && item.feedback === null);
+    if (interview === undefined) continue;
+    // The list response has the canonical candidate identity. Detail responses
+    // can omit consultant_name, so keep that identity when hydrating the form.
+    const fullCandidate = { ...detail.value, candidateName: match.candidateName, candidateEmail: match.candidateEmail, role: match.role };
+    return { response_type: "ephemeral", text: `Opening a feedback form for ${fullCandidate.candidateName}.`, view: buildFeedbackModal(fullCandidate, interview, input.commandId) };
+  }
+  if (lastDetailError !== undefined && found.value.length === 1) return { response_type: "ephemeral", text: describeLog1Error(lastDetailError) };
+  return { response_type: "ephemeral", text: `No completed interview is available for ${candidate.candidateName}.` };
 }
 
 export async function runSlashCommand(input: {

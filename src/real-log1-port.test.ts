@@ -79,6 +79,37 @@ test("opens a feedback form with interviews loaded only for the selected submiss
   assert.deepEqual(paths, ["/api/submission/", "/api/v2/submission/7/", "/api/v2/submission/7/interviews/"]);
 });
 
+test("feedback lookup skips a newer matching submission without a completed interview", async () => {
+  const paths: string[] = [];
+  const port = new RealLog1Port({
+    fetch: async (input) => {
+      const path = new URL(input.toString()).pathname;
+      paths.push(path);
+      if (path === "/api/submission/") return response({ data: [{ ...submission, id: 8 }, submission] });
+      if (path === "/api/v2/submission/8/") return response({ data: { ...submission, id: 8 } });
+      if (path === "/api/v2/submission/8/interviews/") return response({ data: [] });
+      if (path === "/api/v2/submission/7/") return response({ data: submission });
+      if (path === "/api/v2/submission/7/interviews/") return response({ data: [interview] });
+      return response({ detail: "unexpected" }, 404);
+    },
+  });
+  const result = await routeSlashCommand({
+    payload: { command: "/log1", text: "feedback Nisha Karki", user_id: "U-1", team_id: "T-1" },
+    actor,
+    port,
+    commandId: commandId("feedback-skip-empty"),
+  });
+  assert.equal(result.view?.callback_id, "log1_feedback");
+  assert.equal(JSON.parse(result.view?.private_metadata ?? "{}").submissionId, "7");
+  assert.deepEqual(paths, [
+    "/api/submission/",
+    "/api/v2/submission/8/",
+    "/api/v2/submission/8/interviews/",
+    "/api/v2/submission/7/",
+    "/api/v2/submission/7/interviews/",
+  ]);
+});
+
 test("accepts a bare interview array from the live submission detail flow", async () => {
   const port = new RealLog1Port({
     fetch: async (input) => {
