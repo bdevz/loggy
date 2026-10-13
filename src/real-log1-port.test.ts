@@ -33,9 +33,14 @@ test("opens an update form from the search result without a second API request",
   const paths: string[] = [];
   const port = new RealLog1Port({
     fetch: async (input) => {
-      const path = new URL(input.toString()).pathname;
+      const url = new URL(input.toString());
+      const path = url.pathname;
       paths.push(path);
-      if (path === "/api/submission/") return response({ data: Array.from({ length: 10 }, (_, index) => ({ ...submission, id: 7 + index })) });
+      if (path === "/api/submission/") {
+        if (url.searchParams.has("query")) return response({ data: [{ ...submission, consultant_name: "Wrong Candidate" }] });
+        assert.deepEqual(JSON.parse(url.searchParams.get("filter_json") ?? "{}"), { consultant: ["Nisha Karki"] });
+        return response({ data: [submission] });
+      }
       return response({ detail: "Interview service unavailable" }, 503);
     },
   });
@@ -46,6 +51,7 @@ test("opens an update form from the search result without a second API request",
     commandId: commandId("update-lookup"),
   });
   assert.equal(result.view?.callback_id, "log1_update_submission");
+  assert.match(result.text, /Nisha Karki/);
   assert.match(JSON.stringify(result.view), /Nisha Karki/);
   assert.deepEqual(paths, ["/api/submission/"]);
 });
@@ -95,7 +101,33 @@ test("maps live submission and interview list responses and scopes the token", a
   assert.equal(requests.every((request) => request.url.origin === "https://api.log1.com"), true);
   assert.equal(requests.every((request) => request.accept === "application/json"), true);
   assert.match(requests[0]?.url.pathname ?? "", /^\/api\/submission\/$/);
-  assert.match(requests[0]?.url.search ?? "", /query=Nisha%20Karki/);
+  assert.equal(requests[0]?.url.searchParams.has("query"), false);
+  assert.deepEqual(JSON.parse(requests[0]?.url.searchParams.get("filter_json") ?? "{}"), { consultant: ["Nisha Karki"] });
+});
+
+test("resolves a partial candidate query through canonical consultant names", async () => {
+  const requests: URL[] = [];
+  const port = new RealLog1Port({
+    fetch: async (input) => {
+      const url = new URL(input.toString());
+      requests.push(url);
+      if (url.pathname === "/api/submission/") {
+        const filter = url.searchParams.get("filter_json");
+        if (filter === JSON.stringify({ consultant: ["nisha"] })) return response({ data: [] });
+        assert.equal(filter, JSON.stringify({ consultant: ["Nisha Karki"] }));
+        return response({ data: [submission] });
+      }
+      if (url.pathname === "/api/consultant/") return response({ data: [{ name: "Nisha Karki" }, { name: "Other Candidate" }] });
+      return response({ detail: "unexpected" }, 404);
+    },
+  });
+  const result = await port.findSubmissions(actor, "nisha", { includeInterviews: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.length, 1);
+  assert.equal(result.value[0]?.candidateName, "Nisha Karki");
+  assert.deepEqual(requests.map((url) => url.pathname), ["/api/submission/", "/api/consultant/", "/api/submission/"]);
+  assert.equal(requests[1]?.searchParams.get("query"), "nisha");
 });
 
 test("maps next-round interviews, supervisor answers, supervisor name, and lead modified timestamp", async () => {

@@ -51,7 +51,7 @@ npm run start:socket
 
 `SLACK_APP_TOKEN_<TEAM_ID>` is the app-level token with `connections:write`; `SLACK_BOT_TOKEN_<TEAM_ID>` is the installed bot token. The process accepts one Slack installation and resolves its Log1 actor token from the same workspace-scoped environment convention. Set `SLACK_WORKSPACE_ID` explicitly, or omit it only when exactly one `SLACK_APP_TOKEN_<TEAM_ID>` variable is present. The Socket Mode process handles `/log1` and both modal callbacks through the same routing, parser, services, and live `RealLog1Port` used by the HTTP transport. The existing `npm start` HTTP entrypoint remains available for deployments that provide public HTTPS request URLs.
 
-`run.ps1` is the Cashew-style Windows keep-alive runner. On the host, place the workspace-scoped values in `C:\loggy\.env`, run `npm install`, and launch `powershell -ExecutionPolicy Bypass -File .\run.ps1` from the interactive desktop session. The runner loads the file into the process environment, writes only process output to `logs\stdout.log`, and restarts the Socket Mode worker after an exit.
+`run.ps1` is the Cashew-style Windows keep-alive runner. On the host, place the workspace-scoped values in `C:\loggy\.env`, run `npm install`, and launch `powershell -ExecutionPolicy Bypass -File .\run.ps1` from the interactive desktop session. The runner takes a host-wide mutex before starting, loads the file into the process environment, writes only process output to `logs\stdout.log`, and restarts the Socket Mode worker after an exit. Starting the runner twice leaves the first worker running.
 
 ## Using the live adapter
 
@@ -77,6 +77,8 @@ recordFeedback(command)
 The live adapter checks `permission.update` before either mutation, rejects unsupported status/note writes because the observed submission endpoint does not expose those fields, and derives the optimistic version from Log1's `modified` timestamp. Log1 does not expose a numeric revision or ETag in the observed contract, so this is a preflight check rather than an atomic compare-and-swap guarantee. Live update fields are client, rate, employer, email, phone, work type, and vendor contact ID.
 
 Live feedback maps the Slack form to Log1's current questionnaire. It sends coding involved, final round, rating, what went well, issues faced, and remarks. Recommendation is retained in the Slack/domain result for the local workflow, but is not a Log1 questionnaire field in the observed API.
+
+Candidate lookup uses Log1's `consultant` filter and the `/api/consultant/` autocomplete endpoint. The generic submission `query` also matches marketers, so the bot does not use it to choose a candidate.
 
 ## Slack setup for a real deployment
 

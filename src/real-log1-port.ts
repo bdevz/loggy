@@ -245,6 +245,23 @@ const listData = (value: unknown): readonly unknown[] | undefined => {
   return Array.isArray(data) ? data : isRecord(data) && Array.isArray(data.data) ? data.data : undefined;
 };
 
+const consultantNameFrom = (value: unknown): string | undefined => {
+  if (!isRecord(value)) return undefined;
+  const nested = recordValue(value, "consultant") ?? recordValue(value, "consultant_marketing");
+  return stringField(value, "canonical_name")
+    ?? stringField(value, "consultant_name")
+    ?? stringField(value, "full_name")
+    ?? stringField(value, "name")
+    ?? stringField(value, "label")
+    ?? stringField(value, "value")
+    ?? (nested === undefined ? undefined : consultantNameFrom(nested));
+};
+
+const submissionListPath = (filterJson: string, query?: string): string => {
+  const queryPart = query === undefined ? "" : `&query=${encodeURIComponent(query.replace(/&/g, ":amp:"))}`;
+  return `/api/submission/?page=1&page_size=10${queryPart}&filter_json=${encodeURIComponent(filterJson)}&sort_by=modified&filter_for=all`;
+};
+
 const liveFieldsFromChanges = (changes: readonly SubmissionChange[]): Result<LiveSubmissionFields, Log1Error> => {
   const fields: {
     client?: string;
@@ -342,11 +359,33 @@ export class RealLog1Port implements Log1Port {
   }
 
   async findSubmissions(actor: ActorContext, query: string, options?: SubmissionReadOptions): Promise<Result<readonly SubmissionSnapshot[], Log1Error>> {
-    const search = encodeURIComponent(query.trim().replace(/&/g, ":amp:"));
-    const response = await this.request(actor, `/api/submission/?page=1&page_size=10&query=${search}&filter_json=${encodeURIComponent("{}")}&sort_by=modified&filter_for=all`);
+    const trimmedQuery = query.trim();
+    let response = trimmedQuery.length === 0
+      ? await this.request(actor, submissionListPath("{}", ""))
+      : await this.request(actor, submissionListPath(JSON.stringify({ consultant: [trimmedQuery] })));
     if (!response.ok) return response;
-    const rows = listData(response.value);
+    let rows = listData(response.value);
     if (rows === undefined) return err(invalidUpstream("Log1 submission list shape is invalid."));
+
+    if (trimmedQuery.length > 0 && rows.length === 0) {
+      const consultantResponse = await this.request(actor, `/api/consultant/?query=${encodeURIComponent(trimmedQuery.replace(/&/g, ":amp:"))}`);
+      if (!consultantResponse.ok) return consultantResponse;
+      const consultantRows = listData(consultantResponse.value);
+      if (consultantRows === undefined) return err(invalidUpstream("Log1 consultant list shape is invalid."));
+      const queryLower = trimmedQuery.toLowerCase();
+      const consultantNames: string[] = [];
+      for (const consultantRow of consultantRows) {
+        const name = consultantNameFrom(consultantRow)?.trim();
+        if (name === undefined || name.length === 0 || !name.toLowerCase().includes(queryLower) || consultantNames.includes(name)) continue;
+        consultantNames.push(name);
+      }
+      if (consultantNames.length === 0) return ok([]);
+      response = await this.request(actor, submissionListPath(JSON.stringify({ consultant: consultantNames })));
+      if (!response.ok) return response;
+      rows = listData(response.value);
+      if (rows === undefined) return err(invalidUpstream("Log1 submission list shape is invalid."));
+    }
+
     const output: SubmissionSnapshot[] = [];
     for (const row of rows) {
       const mapped = submissionFrom(row);
