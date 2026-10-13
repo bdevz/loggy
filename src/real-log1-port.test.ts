@@ -29,14 +29,13 @@ const interview = {
 const response = (value: unknown, status = 200): Response =>
   new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 
-test("opens an update form without fetching interviews for search results or the selected submission", async () => {
+test("opens an update form from the search result without a second API request", async () => {
   const paths: string[] = [];
   const port = new RealLog1Port({
     fetch: async (input) => {
       const path = new URL(input.toString()).pathname;
       paths.push(path);
       if (path === "/api/submission/") return response({ data: Array.from({ length: 10 }, (_, index) => ({ ...submission, id: 7 + index })) });
-      if (path === "/api/v2/submission/7") return response({ data: { ...submission, client: "Current client" } });
       return response({ detail: "Interview service unavailable" }, 503);
     },
   });
@@ -47,8 +46,8 @@ test("opens an update form without fetching interviews for search results or the
     commandId: commandId("update-lookup"),
   });
   assert.equal(result.view?.callback_id, "log1_update_submission");
-  assert.match(JSON.stringify(result.view), /Current client/);
-  assert.deepEqual(paths, ["/api/submission/", "/api/v2/submission/7"]);
+  assert.match(JSON.stringify(result.view), /Nisha Karki/);
+  assert.deepEqual(paths, ["/api/submission/"]);
 });
 
 test("opens a feedback form with interviews loaded only for the selected submission", async () => {

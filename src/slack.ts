@@ -425,12 +425,16 @@ export async function routeSlashCommand(input: {
   if (candidate === undefined) {
     return { response_type: "ephemeral", text: query.length === 0 ? "No submissions are available." : `No submission matched “${query}”.` };
   }
-  const detail = await input.port.getSubmission(input.actor, candidate.id, { includeInterviews: subcommand === "feedback" });
+  if (subcommand === "update") {
+    // The submission search result already contains every field needed to
+    // render the update form. Defer the authoritative detail read until the
+    // user submits, so Slack's short slash-command trigger window is not spent
+    // on a second network round trip.
+    return { response_type: "ephemeral", text: `Opening an update form for ${candidate.candidateName}.`, view: buildUpdateSubmissionModal(candidate, input.commandId) };
+  }
+  const detail = await input.port.getSubmission(input.actor, candidate.id, { includeInterviews: true });
   if (!detail.ok) return { response_type: "ephemeral", text: describeLog1Error(detail.error) };
   const fullCandidate = detail.value;
-  if (subcommand === "update") {
-    return { response_type: "ephemeral", text: `Opening an update form for ${fullCandidate.candidateName}.`, view: buildUpdateSubmissionModal(fullCandidate, input.commandId) };
-  }
   const interview = fullCandidate.interviews.find((item) => item.status === "completed" && item.feedback === null);
   if (interview === undefined) return { response_type: "ephemeral", text: `No completed interview is available for ${candidate.candidateName}.` };
   return { response_type: "ephemeral", text: `Opening a feedback form for ${fullCandidate.candidateName}.`, view: buildFeedbackModal(fullCandidate, interview, input.commandId) };
