@@ -8,6 +8,11 @@
     "background_color": "#2c2c2c"
   },
   "features": {
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
     "bot_user": {
       "display_name": "Log1",
       "always_online": false
@@ -15,7 +20,6 @@
     "slash_commands": [
       {
         "command": "/log1",
-        "url": "https://YOUR_PUBLIC_HOST.example.com/slack/commands",
         "description": "Update submissions and record interview feedback in Log1.",
         "usage_hint": "help | update [candidate] | feedback [candidate]",
         "should_escape": false
@@ -25,18 +29,46 @@
   "oauth_config": {
     "scopes": {
       "bot": [
+        "app_mentions:read",
+        "assistant:write",
+        "channels:history",
+        "channels:join",
+        "channels:read",
         "commands",
-        "chat:write"
+        "chat:write",
+        "chat:write.customize",
+        "chat:write.public",
+        "dnd:read",
+        "files:read",
+        "files:write",
+        "groups:history",
+        "groups:read",
+        "groups:write",
+        "im:history",
+        "im:read",
+        "im:write",
+        "mpim:history",
+        "mpim:read",
+        "mpim:write",
+        "pins:read",
+        "pins:write",
+        "reactions:read",
+        "reactions:write",
+        "search:read.files",
+        "search:read.mpim",
+        "search:read.users",
+        "users.profile:read",
+        "users:read",
+        "users:read.email"
       ]
     }
   },
   "settings": {
     "interactivity": {
-      "is_enabled": true,
-      "request_url": "https://YOUR_PUBLIC_HOST.example.com/slack/interactions"
+      "is_enabled": true
     },
     "org_deploy_enabled": false,
-    "socket_mode_enabled": false,
+    "socket_mode_enabled": true,
     "token_rotation_enabled": false
   }
 }

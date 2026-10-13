@@ -9,7 +9,8 @@
     "test": "npm run build && node --test dist/*.test.js",
     "demo": "npm run build && node dist/demo.js",
     "smoke:live": "npm run build && node dist/live-read-smoke.js",
-    "start": "npm run build && node dist/server.js"
+    "start": "npm run build && node dist/server.js",
+    "start:socket": "npm run build && node dist/socket-server.js"
   },
   "engines": {
     "node": ">=20"
@@ -17,5 +18,8 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0"
   }
 }

@@ -37,6 +37,22 @@ For one workspace, set `SLACK_BOT_TOKEN_<TEAM_ID>` and `LOG1_ACTOR_TOKEN_<TEAM_I
 
 The modal builders and parser are transport-friendly Block Kit values. Slash command HTTP requests acknowledge immediately with no modal in the response. The background path calls the injected `SlackApi.viewsOpen` with Slack's `trigger_id` and sends an ephemeral failure follow-up when Log1 lookup or modal opening fails. Modal submissions validate `type: "view_submission"`, `view.type: "modal"`, and an exact callback/block/action registry; valid shapes are cleared immediately and mutations run in the background.
 
+## Socket Mode deployment
+
+For a Cashew-style long-running host, use the Socket Mode entrypoint. It uses the Slack Bolt `App` with `socketMode: true`, so no public HTTP endpoint is required:
+
+```sh
+SLACK_WORKSPACE_ID='T123' \
+SLACK_APP_TOKEN_T123='xapp-...' \
+SLACK_BOT_TOKEN_T123='xoxb-...' \
+LOG1_ACTOR_TOKEN_T123='...' \
+npm run start:socket
+```
+
+`SLACK_APP_TOKEN_<TEAM_ID>` is the app-level token with `connections:write`; `SLACK_BOT_TOKEN_<TEAM_ID>` is the installed bot token. The process accepts one Slack installation and resolves its Log1 actor token from the same workspace-scoped environment convention. Set `SLACK_WORKSPACE_ID` explicitly, or omit it only when exactly one `SLACK_APP_TOKEN_<TEAM_ID>` variable is present. The Socket Mode process handles `/log1` and both modal callbacks through the same routing, parser, services, and live `RealLog1Port` used by the HTTP transport. The existing `npm start` HTTP entrypoint remains available for deployments that provide public HTTPS request URLs.
+
+`run.ps1` is the Cashew-style Windows keep-alive runner. On the host, place the workspace-scoped values in `C:\loggy\.env`, run `npm install`, and launch `powershell -ExecutionPolicy Bypass -File .\run.ps1` from the interactive desktop session. The runner loads the file into the process environment, writes only process output to `logs\stdout.log`, and restarts the Socket Mode worker after an exit.
+
 ## Using the live adapter
 
 Production construction is:
@@ -79,7 +95,7 @@ To register the command:
 4. Install the app in that workspace. Reinstall it after changing the manifest or scopes.
 5. Confirm that the app's slash command is `/log1`, then run `/log1 help` in Slack.
 
-The manifest enables the `commands` and `chat:write` bot scopes. It enables interactivity for the modal workflow and keeps token rotation disabled because this deployment reads a static workspace-scoped bot token from its environment. It does not subscribe to Events API events.
+The manifest carries the Cashew bot's existing ConsultAdd scopes so the new app can use the same approved Slack capabilities. The Log1 code currently uses `commands` and `chat:write`; the other scopes keep the app aligned with the Cashew setup for later Slack workflows. It enables interactivity for the modal workflow and keeps token rotation disabled because this deployment reads a static workspace-scoped bot token from its environment. It does not subscribe to Events API events or use Socket Mode.
 
 Set the server credentials for each installed workspace. Replace `T123` with the Slack team ID in each variable name.
 
@@ -104,4 +120,4 @@ Slack expects an acknowledgement within three seconds. Keep signature verificati
 - `src/demo.ts` — local user-visible flow.
 - `src/loggy.test.ts` — built-in test runner coverage for the main behavior and failure modes.
 
-The only runtime dependency is Node's standard library. TypeScript and Node type declarations are development dependencies.
+The HTTP transport uses Node's standard library. The Socket Mode entrypoint adds `@slack/bolt`; TypeScript and Node type declarations remain development dependencies.
