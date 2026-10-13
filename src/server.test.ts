@@ -5,7 +5,8 @@ import { InMemoryLog1Port } from "./log1-port";
 import type { SlackApi } from "./slack";
 
 const slackApi: SlackApi = {
-  async viewsOpen() {},
+  async viewsOpen() { return { viewId: "test-view" }; },
+  async viewsUpdate() {},
   async postEphemeral() {},
 };
 

@@ -5,10 +5,12 @@ import {
   authenticatedActor,
   actorId,
   commandId,
+  err,
   submissionId,
   unauthenticatedActor,
   type Result,
   type Log1Error,
+  type Log1Port,
   type SubmissionSnapshot,
 } from "./domain";
 import { InMemoryLog1Port, seededInterviewIds, seededSubmissionIds } from "./log1-port";
@@ -18,6 +20,9 @@ import {
   buildUpdateSubmissionModal,
   parseModalSubmission,
   routeSlashCommand,
+  runSlashCommand,
+  type SlackApi,
+  type SlackModal,
   verifySlackSignature,
 } from "./slack";
 
@@ -32,6 +37,40 @@ const valueOf = <T>(result: Result<T, Log1Error>): T => {
 
 const getAlex = async (port: InMemoryLog1Port): Promise<SubmissionSnapshot> =>
   valueOf(await port.getSubmission(actor, seededSubmissionIds.alex));
+
+const slashPayload = {
+  type: "slash_command",
+  command: "/log1",
+  text: "update Alex Rivera",
+  user_id: "U-TEST",
+  team_id: "T-TEST",
+  trigger_id: "trigger-1",
+  channel_id: "C-TEST",
+} as const;
+
+const delegatedPort = (findSubmissions: Log1Port["findSubmissions"]): Log1Port => {
+  const fixture = new InMemoryLog1Port();
+  return {
+    findSubmissions,
+    getSubmission: (requestActor, id) => fixture.getSubmission(requestActor, id),
+    updateSubmission: (command) => fixture.updateSubmission(command),
+    recordFeedback: (command) => fixture.recordFeedback(command),
+  };
+};
+
+const recordingSlackApi = (events: string[], updatedViews: SlackModal[]): SlackApi => ({
+  async viewsOpen({ view }) {
+    events.push(`open:${view.callback_id}`);
+    return { viewId: "V-TEST", hash: "H-TEST" };
+  },
+  async viewsUpdate({ view }) {
+    events.push(`update:${view.callback_id}`);
+    updatedViews.push(view);
+  },
+  async postEphemeral({ text }) {
+    events.push(`ephemeral:${text}`);
+  },
+});
 
 test("verifies Slack signatures and rejects stale or tampered requests", () => {
   const body = "command=%2Flog1&text=help";
@@ -68,6 +107,53 @@ test("routes help, update, and feedback slash commands", async () => {
     commandId: commandId("cmd-feedback"),
   });
   assert.equal(feedback.view?.callback_id, "log1_feedback");
+});
+
+test("opens the loading view before a slow lookup and updates that same view to the form", async () => {
+  const events: string[] = [];
+  const updatedViews: SlackModal[] = [];
+  const fixture = new InMemoryLog1Port();
+  const port = delegatedPort(async (requestActor, query, options) => {
+    events.push("lookup");
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    return fixture.findSubmissions(requestActor, query);
+  });
+  const running = runSlashCommand({ payload: slashPayload, actor, port, commandId: commandId("slow-update"), slackApi: recordingSlackApi(events, updatedViews), lookupTimeoutMs: 100 });
+  assert.deepEqual(events, ["open:log1_loading"]);
+  await running;
+  assert.equal(events[1], "lookup");
+  assert.equal(updatedViews[0]?.callback_id, "log1_update_submission");
+  assert.equal(events[2], "update:log1_update_submission");
+});
+
+test("updates the existing loading view with a timeout and never installs a late form", async () => {
+  const events: string[] = [];
+  const updatedViews: SlackModal[] = [];
+  const fixture = new InMemoryLog1Port();
+  const port = delegatedPort(async (requestActor, query, options) => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    return fixture.findSubmissions(requestActor, query);
+  });
+  await runSlashCommand({ payload: slashPayload, actor, port, commandId: commandId("timeout-update"), slackApi: recordingSlackApi(events, updatedViews), lookupTimeoutMs: 5 });
+  await new Promise<void>((resolve) => setTimeout(resolve, 40));
+  assert.equal(updatedViews.length, 1);
+  assert.equal(updatedViews[0]?.callback_id, "log1_loading");
+  const text = updatedViews[0]?.blocks[0];
+  assert.equal(text?.type, "section");
+  if (text?.type === "section") assert.match(text.text.text, /too long/);
+  assert.equal(events.filter((event) => event.startsWith("update:")).length, 1);
+});
+
+test("renders lookup errors inside the already-open loading view", async () => {
+  const events: string[] = [];
+  const updatedViews: SlackModal[] = [];
+  const port = delegatedPort(async () => err({ kind: "temporarily_unavailable", message: "Log1 is unavailable." }));
+  await runSlashCommand({ payload: slashPayload, actor, port, commandId: commandId("error-update"), slackApi: recordingSlackApi(events, updatedViews) });
+  assert.equal(updatedViews.length, 1);
+  assert.equal(updatedViews[0]?.callback_id, "log1_loading");
+  const text = updatedViews[0]?.blocks[0];
+  assert.equal(text?.type, "section");
+  if (text?.type === "section") assert.match(text.text.text, /temporarily unavailable/);
 });
 
 test("parses update and feedback modal submissions with hidden identifiers", async () => {

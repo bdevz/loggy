@@ -66,7 +66,7 @@ type SlackBlock =
       readonly optional?: boolean;
     };
 
-export type SlackModal = {
+export type SlackFormModal = {
   readonly type: "modal";
   readonly callback_id: "log1_update_submission" | "log1_feedback";
   readonly title: SlackText;
@@ -75,6 +75,18 @@ export type SlackModal = {
   readonly private_metadata: string;
   readonly blocks: readonly SlackBlock[];
 };
+
+/** A modal that is already open while the slower Log1 lookup runs. */
+export type SlackStatusModal = {
+  readonly type: "modal";
+  readonly callback_id: "log1_loading";
+  readonly title: SlackText;
+  readonly close: SlackText;
+  readonly private_metadata: string;
+  readonly blocks: readonly SlackBlock[];
+};
+
+export type SlackModal = SlackFormModal | SlackStatusModal;
 
 export type SlackResponse = {
   readonly response_type: "ephemeral";
@@ -94,7 +106,9 @@ export type SlackBoundaryPayload =
   | (SlackSlashPayload & { readonly type: "slash_command" })
   | SlackViewSubmissionPayload;
 
+export type SlackViewHandle = { readonly viewId: string; readonly hash?: string };
 export type ViewsOpenInput = { readonly workspaceId: string; readonly triggerId: string; readonly view: SlackModal };
+export type ViewsUpdateInput = { readonly workspaceId: string; readonly viewId: string; readonly hash?: string; readonly view: SlackModal };
 export type PostEphemeralInput = {
   readonly workspaceId: string;
   readonly channelId: string;
@@ -105,12 +119,14 @@ export type PostEphemeralInput = {
 
 /** The only Slack calls the application needs. Implement this with the Slack Web API in production. */
 export interface SlackApi {
-  viewsOpen(input: ViewsOpenInput): Promise<void>;
+  viewsOpen(input: ViewsOpenInput): Promise<SlackViewHandle>;
+  viewsUpdate(input: ViewsUpdateInput): Promise<void>;
   postEphemeral(input: PostEphemeralInput): Promise<void>;
 }
 
 export const noopSlackApi: SlackApi = {
-  async viewsOpen(): Promise<void> {},
+  async viewsOpen(): Promise<SlackViewHandle> { return { viewId: "noop" }; },
+  async viewsUpdate(): Promise<void> {},
   async postEphemeral(): Promise<void> {},
 };
 
@@ -120,7 +136,7 @@ export const createSlackWebApi = (
   resolveBotToken: SlackBotTokenResolver,
   apiBaseUrl = "https://slack.com/api",
 ): SlackApi => {
-  const call = async (workspaceId: string, method: string, body: Record<string, unknown>): Promise<void> => {
+  const call = async (workspaceId: string, method: string, body: Record<string, unknown>): Promise<UnknownRecord> => {
     const token = await resolveBotToken(workspaceId);
     if (token === undefined || token.trim().length === 0) throw new Error("Slack bot token is not configured for this workspace.");
     const response = await fetch(`${apiBaseUrl}/${method}`, {
@@ -134,10 +150,25 @@ export const createSlackWebApi = (
       const error = isRecord(payload) && typeof payload.error === "string" ? payload.error : "unknown_error";
       throw new Error(`Slack API ${method} failed: ${error}.`);
     }
+    return payload;
   };
   return {
-    viewsOpen: (input) => call(input.workspaceId, "views.open", { trigger_id: input.triggerId, view: input.view }),
-    postEphemeral: (input) => call(input.workspaceId, "chat.postEphemeral", { channel: input.channelId, user: input.userId, text: input.text }),
+    async viewsOpen(input): Promise<SlackViewHandle> {
+      const payload = await call(input.workspaceId, "views.open", { trigger_id: input.triggerId, view: input.view });
+      const view = readRecord(payload, "view");
+      const viewId = readString(view ?? {}, "id");
+      if (viewId === undefined || viewId.length === 0) throw new Error("Slack views.open returned no view ID.");
+      const hash = readString(view ?? {}, "hash");
+      return hash === undefined ? { viewId } : { viewId, hash };
+    },
+    async viewsUpdate(input): Promise<void> {
+      await call(input.workspaceId, "views.update", {
+        view_id: input.viewId,
+        ...(input.hash === undefined ? {} : { hash: input.hash }),
+        view: input.view,
+      });
+    },
+    postEphemeral: (input) => call(input.workspaceId, "chat.postEphemeral", { channel: input.channelId, user: input.userId, text: input.text }).then(() => undefined),
   };
 };
 
@@ -221,6 +252,17 @@ export const withModalOrigin = (view: SlackModal, origin: ModalOrigin): SlackMod
   if (!isRecord(metadata)) throw new Error("Modal metadata must be an object.");
   return { ...view, private_metadata: JSON.stringify({ ...metadata, origin }) };
 };
+
+export const buildStatusModal = (text: string): SlackStatusModal => ({
+  type: "modal",
+  callback_id: "log1_loading",
+  title: plainText("Log1"),
+  close: plainText("Close"),
+  private_metadata: JSON.stringify({ kind: "loading" }),
+  blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
+});
+
+export const buildLoadingModal = (): SlackStatusModal => buildStatusModal("Searching Log1…");
 
 export const buildUpdateSubmissionModal = (candidate: SubmissionSnapshot, command: CommandId): SlackModal => {
   if (isLiveSubmission(candidate)) {
@@ -448,55 +490,90 @@ export async function runSlashCommand(input: {
   readonly slackApi: SlackApi;
   readonly lookupTimeoutMs?: number;
 }): Promise<void> {
-  const timeoutMs = input.lookupTimeoutMs ?? 2_000;
+  const destination = input.payload.channel_id === undefined || input.payload.channel_id.length === 0
+    ? undefined
+    : { channelId: input.payload.channel_id, userId: input.payload.user_id };
+  const subcommand = input.payload.text.trim().split(/\s+/, 1)[0] ?? "help";
+  const needsModal = subcommand === "update" || subcommand === "feedback";
+
+  // Help and invalid subcommands do not need a trigger-backed view. Keep them
+  // on the simple response path so the loading modal only represents work.
+  if (!needsModal) {
+    const result = await routeSlashCommand(input);
+    if (destination !== undefined) await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: result.text });
+    return;
+  }
+
+  const triggerId = input.payload.trigger_id;
+  if (triggerId === undefined || triggerId.length === 0 || destination === undefined) {
+    if (destination !== undefined) await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: "Slack did not provide a trigger or channel, so the form could not be opened." });
+    return;
+  }
+  const origin = {
+    workspaceId: input.payload.team_id,
+    userId: input.payload.user_id,
+    channelId: destination.channelId,
+  };
+
+  let handle: SlackViewHandle;
+  try {
+    // Open before touching Log1. Slack's trigger_id is short-lived, while the
+    // opened view can be updated after the provider lookup finishes.
+    handle = await input.slackApi.viewsOpen({
+      workspaceId: input.payload.team_id,
+      triggerId,
+      view: withModalOrigin(buildLoadingModal(), origin),
+    });
+  } catch {
+    await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: "Log1 could not open the form in Slack. Try the command again." }).catch(() => undefined);
+    return;
+  }
+
+  const updateView = async (view: SlackModal): Promise<boolean> => {
+    try {
+      await input.slackApi.viewsUpdate({ workspaceId: input.payload.team_id, viewId: handle.viewId, ...(handle.hash === undefined ? {} : { hash: handle.hash }), view });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const timeoutMs = input.lookupTimeoutMs ?? 8_000;
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   const timeoutPromise = new Promise<SlackResponse>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error("LOG1_LOOKUP_TIMEOUT")), timeoutMs);
+    timeout = setTimeout(() => {
+      timedOut = true;
+      reject(new Error("LOG1_LOOKUP_TIMEOUT"));
+    }, timeoutMs);
   });
   let result: SlackResponse;
   try {
     result = await Promise.race([routeSlashCommand(input), timeoutPromise]);
   } catch {
-    if (input.payload.channel_id !== undefined && input.payload.channel_id.length > 0) {
-      await input.slackApi.postEphemeral({
-        workspaceId: input.payload.team_id,
-        channelId: input.payload.channel_id,
-        userId: input.payload.user_id,
-        text: "Log1 took too long to find that submission. Try the command again.",
-      });
+    const text = timedOut
+      ? "Log1 took too long to find that submission. Try the command again."
+      : "Log1 could not process that command. Try again.";
+    if (!await updateView(buildStatusModal(text))) {
+      await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text }).catch(() => undefined);
     }
     return;
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
-  const destination = input.payload.channel_id === undefined || input.payload.channel_id.length === 0
-    ? undefined
-    : { channelId: input.payload.channel_id, userId: input.payload.user_id };
+
   if (result.view !== undefined) {
-    const triggerId = input.payload.trigger_id;
-    if (triggerId === undefined || triggerId.length === 0) {
-      if (destination !== undefined) await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: "Slack did not provide a trigger ID, so the form could not be opened." });
-      return;
-    }
-    try {
-      await input.slackApi.viewsOpen({
-        workspaceId: input.payload.team_id,
-        triggerId,
-        view: withModalOrigin(result.view, {
-          workspaceId: input.payload.team_id,
-          userId: input.payload.user_id,
-          channelId: input.payload.channel_id ?? "",
-        }),
-      });
-      if (destination !== undefined) await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: result.text });
-    } catch {
-      if (destination !== undefined) {
-        await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: "Log1 found the candidate, but Slack could not open the form. Try the command again." });
-      }
+    const updated = await updateView(withModalOrigin(result.view, origin));
+    if (updated) {
+      await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: result.text }).catch(() => undefined);
+    } else {
+      await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: "Log1 found the candidate, but Slack could not load the form. Try the command again." }).catch(() => undefined);
     }
     return;
   }
-  if (destination !== undefined) await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: result.text });
+
+  if (!await updateView(buildStatusModal(result.text))) {
+    await input.slackApi.postEphemeral({ ...destination, workspaceId: input.payload.team_id, text: result.text }).catch(() => undefined);
+  }
 }
 
 type UnknownRecord = { readonly [key: string]: unknown };

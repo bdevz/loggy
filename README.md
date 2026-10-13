@@ -35,7 +35,7 @@ Local mode is explicit. Use `createServer({ mode: "local" })` or run `LOGGY_MODE
 
 For one workspace, set `SLACK_BOT_TOKEN_<TEAM_ID>` and `LOG1_ACTOR_TOKEN_<TEAM_ID>`. A global token is accepted only when paired with the matching `SLACK_BOT_TOKEN_WORKSPACE_ID` or `LOG1_ACTOR_TOKEN_WORKSPACE_ID`. For a credential store, inject `authResolver` instead of using environment variables. Never put a Log1 token in Slack metadata, block values, logs, or this repository.
 
-The modal builders and parser are transport-friendly Block Kit values. Slash command HTTP requests acknowledge immediately with no modal in the response. The background path calls the injected `SlackApi.viewsOpen` with Slack's `trigger_id` and sends an ephemeral failure follow-up when Log1 lookup or modal opening fails. Modal submissions validate `type: "view_submission"`, `view.type: "modal"`, and an exact callback/block/action registry; valid shapes are cleared immediately and mutations run in the background.
+The modal builders and parser are transport-friendly Block Kit values. Slash commands acknowledge immediately and open a loading modal before querying Log1. The bot replaces that view with the form or a result message through `views.update`. This keeps Log1 latency outside Slack's short trigger lifetime. Modal submissions validate `type: "view_submission"`, `view.type: "modal"`, and an exact callback/block/action registry. Valid shapes are cleared immediately and mutations run in the background.
 
 ## Socket Mode deployment
 
@@ -82,22 +82,20 @@ Live feedback maps the Slack form to Log1's current questionnaire. It sends codi
 
 The source code does not register a slash command in Slack. Slack shows `/log1` only after you create or import the app and install it in the target workspace.
 
-The repository includes [`slack-app-manifest.json`](slack-app-manifest.json). Before importing it, replace `YOUR_PUBLIC_HOST.example.com` in both URLs with the public HTTPS host that runs this server. The host must expose these exact paths:
-
-- `POST /slack/commands` for the slash command.
-- `POST /slack/interactions` for modal submissions.
+The repository includes [`slack-app-manifest.json`](slack-app-manifest.json) configured for Socket Mode. It requires a running worker with an app-level token and an installed bot token. No public request URL is needed.
 
 To register the command:
 
-1. Deploy the server at a public HTTPS host.
-2. Open Slack's app management page and choose **Create New App**, then **From an app manifest**.
-3. Select the target workspace, choose JSON, paste the edited manifest, and create the app.
-4. Install the app in that workspace. Reinstall it after changing the manifest or scopes.
-5. Confirm that the app's slash command is `/log1`, then run `/log1 help` in Slack.
+1. Open Slack's app management page and choose **Create New App**, then **From an app manifest**.
+2. Select the target workspace, choose JSON, paste the manifest, and create the app.
+3. Install the app in that workspace. Reinstall it after changing scopes.
+4. Create an app-level token with `connections:write` and configure the worker as described in [Socket Mode deployment](#socket-mode-deployment).
+5. Start the worker and confirm that its log says `Log1 Slack Socket Mode app connected.`
+6. Run `/log1 help`, then `/log1 update candidate name` in that workspace.
 
-The manifest carries the Cashew bot's existing ConsultAdd scopes so the new app can use the same approved Slack capabilities. The Log1 code currently uses `commands` and `chat:write`; the other scopes keep the app aligned with the Cashew setup for later Slack workflows. It enables interactivity for the modal workflow and keeps token rotation disabled because this deployment reads a static workspace-scoped bot token from its environment. It does not subscribe to Events API events or use Socket Mode.
+The manifest carries the Cashew bot's existing ConsultAdd scopes so the new app can use the same approved Slack capabilities. The Log1 code currently uses `commands` and `chat:write`. It enables interactivity and Socket Mode, and keeps token rotation disabled because this deployment reads a static workspace-scoped bot token from its environment. It does not subscribe to Events API events.
 
-Set the server credentials for each installed workspace. Replace `T123` with the Slack team ID in each variable name.
+For an HTTP deployment instead, disable Socket Mode and set the slash command request URL to `https://YOUR_HOST/slack/commands` and the interactivity URL to `https://YOUR_HOST/slack/interactions`. Set the credentials below and run `npm start`. Replace `T123` with the Slack team ID in each variable name.
 
 ```sh
 SLACK_SIGNING_SECRET='...'
@@ -107,7 +105,7 @@ LOG1_ACTOR_TOKEN_T123='...'
 
 Restart the server after changing credentials. `GET /health` returns `200` only when the signing secret, a workspace-scoped Log1 credential, the live Log1 adapter, and the Slack Web API transport are configured.
 
-Slack expects an acknowledgement within three seconds. Keep signature verification, parsing, and the acknowledgement on the fast path. The background slash-command lookup has a two-second bound because Slack trigger IDs expire quickly. Move slow Log1 work behind a queue when that bound is not enough. Send follow-up text through the injected Slack Web API. Never put a Log1 access token in `private_metadata`, block values, logs, or a repository. Map the Slack team/user pair to an encrypted credential or short-lived provider token in a server-side credential store; `LOG1_ACTOR_TOKEN` is only a local demo placeholder. The in-memory idempotency store does not survive process restarts. Production needs a durable store with an atomic uniqueness constraint before it can claim restart-safe retries.
+Slack expects an acknowledgement within three seconds. Keep signature verification, parsing, acknowledgement, and opening the loading view on the fast path. Log1 lookup runs after the view opens and updates that existing view when it finishes. Never put a Log1 access token in `private_metadata`, block values, logs, or a repository. Map the Slack team/user pair to an encrypted credential or short-lived provider token in a server-side credential store. The current environment resolver uses one Log1 credential per workspace, so Log1 permissions come from that account. The in-memory idempotency store does not survive process restarts. Production needs a durable store with an atomic uniqueness constraint before it can claim restart-safe retries.
 
 ## Project layout
 

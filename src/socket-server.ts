@@ -10,6 +10,7 @@ import {
   type SlackApi,
   type SlackModal,
   type SlackSlashPayload,
+  type SlackViewHandle,
 } from "./slack";
 import {
   createScopedEnvTokenResolver,
@@ -30,7 +31,10 @@ export type SocketModeOptions = {
 };
 
 type SlackApiClient = {
-  readonly views: { open(input: { readonly trigger_id: string; readonly view: unknown }): Promise<{ readonly ok?: boolean; readonly error?: string }> };
+  readonly views: {
+    open(input: { readonly trigger_id: string; readonly view: unknown }): Promise<{ readonly ok?: boolean; readonly error?: string; readonly view?: { readonly id?: string; readonly hash?: string } }>;
+    update(input: { readonly view_id: string; readonly hash?: string; readonly view: unknown }): Promise<{ readonly ok?: boolean; readonly error?: string }>;
+  };
   readonly chat: { postEphemeral(input: { readonly channel: string; readonly user: string; readonly text: string }): Promise<{ readonly ok?: boolean; readonly error?: string }> };
 };
 
@@ -57,9 +61,20 @@ const workspaceFromEnvironment = (environment: NodeJS.ProcessEnv): string => {
 };
 
 const boltSlackApi = (client: SlackApiClient): SlackApi => ({
-  async viewsOpen(input): Promise<void> {
+  async viewsOpen(input): Promise<SlackViewHandle> {
     const response = await client.views.open({ trigger_id: input.triggerId, view: input.view as unknown as SlackModal });
     if (response.ok !== true) throw new Error(`Slack views.open failed: ${response.error ?? "unknown_error"}.`);
+    const viewId = response.view?.id;
+    if (viewId === undefined || viewId.length === 0) throw new Error("Slack views.open returned no view ID.");
+    return response.view?.hash === undefined ? { viewId } : { viewId, hash: response.view.hash };
+  },
+  async viewsUpdate(input): Promise<void> {
+    const response = await client.views.update({
+      view_id: input.viewId,
+      ...(input.hash === undefined ? {} : { hash: input.hash }),
+      view: input.view as unknown as SlackModal,
+    });
+    if (response.ok !== true) throw new Error(`Slack views.update failed: ${response.error ?? "unknown_error"}.`);
   },
   async postEphemeral(input): Promise<void> {
     const response = await client.chat.postEphemeral({ channel: input.channelId, user: input.userId, text: input.text });
@@ -136,10 +151,6 @@ export const createSocketModeApp = (options: SocketModeOptions = {}): App => {
       port,
       commandId: makeStableCommandId(`socket:${payload.trigger_id ?? `${payload.user_id}:${payload.text}`}`),
       slackApi,
-      // Log1's search endpoint is consistently just over two seconds from the
-      // Cashew host. Keep the lookup inside Slack's trigger lifetime while
-      // allowing the live request enough room to complete.
-      lookupTimeoutMs: 2_800,
     }).catch(async () => {
       if (payload.channel_id !== undefined) {
         await client.chat.postEphemeral({ channel: payload.channel_id, user: payload.user_id, text: "Log1 could not process that command. Try again." }).catch(() => undefined);
