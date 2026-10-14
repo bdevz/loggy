@@ -215,14 +215,34 @@ export const startSocketModeServer = async (): Promise<App> => {
   return app;
 };
 
+type SocketModeLifecycle = {
+  readonly init: () => Promise<unknown>;
+  readonly start: () => Promise<unknown>;
+  readonly stop: (...args: unknown[]) => Promise<unknown>;
+};
+
+/** Start every workspace worker, rolling back partial startup on failure. */
+export const startSocketModeApps = async (apps: readonly SocketModeLifecycle[]): Promise<void> => {
+  const active: SocketModeLifecycle[] = [];
+  try {
+    for (const app of apps) {
+      // Register before init so a receiver that fails partway through startup
+      // is still given a chance to close its socket and timers.
+      active.push(app);
+      await app.init();
+      await app.start();
+    }
+  } catch (error: unknown) {
+    await Promise.allSettled(active.map((app) => app.stop()));
+    throw error;
+  }
+};
+
 export const startSocketModeServers = async (): Promise<readonly App[]> => {
   const environment = process.env;
   const workspaceIds = workspaceIdsFromEnvironment(environment);
   const apps = workspaceIds.map((workspaceId) => createSocketModeApp({ workspaceId, environment }));
-  await Promise.all(apps.map(async (app) => {
-    await app.init();
-    await app.start();
-  }));
+  await startSocketModeApps(apps);
   process.stdout.write(`Log1 Slack Socket Mode apps connected for ${workspaceIds.join(", ")}.\n`);
   return apps;
 };
